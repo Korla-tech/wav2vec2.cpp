@@ -1,0 +1,73 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  ubuntu-latest:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake
+
+    - name: Build
+      run: |
+        mkdir build
+        cd build
+        cmake ..
+        cmake --build . --config Release -j $(nproc)
+
+    - name: Test CLI exists
+      run: |
+        test -f build/bin/wav2vec2-cli
+        test -f build/bin/quantize-wav2vec2
+
+  macos-latest:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Build (Metal)
+      run: |
+        mkdir build
+        cd build
+        cmake -DGGML_METAL=ON ..
+        cmake --build . --config Release -j $(sysctl -n hw.ncpu)
+
+    - name: Test CLI exists
+      run: |
+        test -f build/bin/wav2vec2-cli
+        test -f build/bin/quantize-wav2vec2
+
+  windows-latest:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Build
+      run: |
+        mkdir build
+        cd build
+        cmake ..
+        cmake --build . --config Release
+
+    - name: Test CLI exists
+      run: |
+        Test-Path build/bin/Release/wav2vec2-cli.exe

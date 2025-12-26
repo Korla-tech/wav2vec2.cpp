@@ -1,0 +1,33 @@
+# Build directories
+build/
+build-*/
+cmake-build-*/
+
+# XCFramework (built artifact)
+*.xcframework/
+
+# IDE
+.vscode/
+.idea/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Models (too large for git)
+models/*.bin
+models/wav2vec2-*/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Compiled objects
+*.o
+*.a
+*.so
+*.dylib

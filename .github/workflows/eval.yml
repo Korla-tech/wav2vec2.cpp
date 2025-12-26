@@ -1,0 +1,89 @@
+name: Evaluation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+  workflow_dispatch:
+
+jobs:
+  pytorch-comparison:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Python dependencies
+      run: |
+        pip install torch transformers librosa numpy
+
+    - name: Build wav2vec2.cpp
+      run: |
+        mkdir build
+        cd build
+        cmake ..
+        cmake --build . --config Release -j $(nproc)
+
+    - name: Download test model
+      run: |
+        pip install huggingface_hub
+        python -c "from huggingface_hub import snapshot_download; snapshot_download('facebook/wav2vec2-base-960h', local_dir='models/wav2vec2-base')"
+
+    - name: Convert model
+      run: |
+        python models/convert-wav2vec2-to-ggml.py facebook/wav2vec2-lv-60-espeak-cv-ft models/wav2vec2-phoneme
+
+    - name: Download test audio
+      run: |
+        mkdir -p samples
+        # Use a simple test tone or download sample
+        python -c "
+        import numpy as np
+        from scipy.io import wavfile
+        sr = 16000
+        t = np.linspace(0, 1, sr)
+        # Simple speech-like signal (not silence)
+        audio = (np.sin(2*np.pi*440*t) * 0.3).astype(np.float32)
+        wavfile.write('samples/test.wav', sr, (audio * 32767).astype(np.int16))
+        "
+        pip install scipy
+
+    - name: Run evaluation
+      run: |
+        python scripts/eval_vs_pytorch.py \
+          --audio samples/test.wav \
+          --cpp-model models/wav2vec2-phoneme/ggml-model-f16.bin \
+          --pytorch-model facebook/wav2vec2-lv-60-espeak-cv-ft \
+          --output results/eval_results.json
+
+    - name: Check results
+      run: |
+        python -c "
+        import json
+        with open('results/eval_results.json') as f:
+            results = json.load(f)
+        per = results.get('per', 1.0)
+        print(f'PER vs PyTorch: {per:.2%}')
+        assert per < 0.10, f'PER {per:.2%} exceeds 10% threshold'
+        print('PASS: C++ output matches PyTorch reference')
+        "
+
+    - name: Upload results
+      uses: actions/upload-artifact@v4
+      with:
+        name: eval-results
+        path: results/
