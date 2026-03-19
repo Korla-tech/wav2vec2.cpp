@@ -31,3 +31,7 @@ venv/
 *.a
 *.so
 *.dylib
+
+vocab.json
+*.bin
+*.wav

@@ -32,7 +32,7 @@ endif()
 add_library(wav2vec2
             ../include/wav2vec2.h
             wav2vec2-arch.h
-            wav2vec2.cpp
+            wav2vec2bert.cpp
             )
 
 set_target_properties(wav2vec2 PROPERTIES

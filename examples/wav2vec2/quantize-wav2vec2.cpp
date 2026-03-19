@@ -18,24 +18,14 @@
 #include <vector>
 #include <regex>
 
-#define W2V_MAX_CONV_LAYERS 7
-
-// Wav2Vec2 hyperparameters
+// Wav2Vec2Bert hyperparameters (converter writes only these 6 fields)
 struct wav2vec2_hparams {
     int32_t n_hidden       = 1024;
     int32_t n_layers       = 24;
     int32_t n_heads        = 16;
     int32_t n_intermediate = 4096;
     int32_t n_vocab        = 392;
-    int32_t n_conv_layers  = 7;
-
-    int32_t conv_dim[W2V_MAX_CONV_LAYERS];
-    int32_t conv_kernel[W2V_MAX_CONV_LAYERS];
-    int32_t conv_stride[W2V_MAX_CONV_LAYERS];
-
-    int32_t num_conv_pos_embeddings = 128;
-    int32_t num_conv_pos_embedding_groups = 16;
-    int32_t ftype = 1;
+    int32_t n_conv_layers  = 31;
 };
 
 // Quantize wav2vec2 model
@@ -62,8 +52,8 @@ static bool wav2vec2_model_quantize(
     {
         uint32_t magic;
         finp.read((char *) &magic, sizeof(magic));
-        if (magic != 0x77766332) {  // "wv2c"
-            fprintf(stderr, "%s: invalid model file '%s' (bad magic: 0x%08x, expected 0x77766332)\n",
+        if (magic != 0x77766232) {  // "wv2b"
+            fprintf(stderr, "%s: invalid model file '%s' (bad magic: 0x%08x, expected 0x77766232)\n",
                     __func__, fname_inp.c_str(), magic);
             return false;
         }
@@ -72,7 +62,7 @@ static bool wav2vec2_model_quantize(
 
     wav2vec2_hparams hparams;
 
-    // Load hyperparameters
+    // Load hyperparameters (wav2vec2bert format)
     {
         finp.read((char *) &hparams.n_hidden,       sizeof(hparams.n_hidden));
         finp.read((char *) &hparams.n_layers,       sizeof(hparams.n_layers));
@@ -80,23 +70,9 @@ static bool wav2vec2_model_quantize(
         finp.read((char *) &hparams.n_intermediate, sizeof(hparams.n_intermediate));
         finp.read((char *) &hparams.n_vocab,        sizeof(hparams.n_vocab));
         finp.read((char *) &hparams.n_conv_layers,  sizeof(hparams.n_conv_layers));
-
-        for (int i = 0; i < hparams.n_conv_layers; ++i) {
-            finp.read((char *) &hparams.conv_dim[i], sizeof(hparams.conv_dim[i]));
-        }
-        for (int i = 0; i < hparams.n_conv_layers; ++i) {
-            finp.read((char *) &hparams.conv_kernel[i], sizeof(hparams.conv_kernel[i]));
-        }
-        for (int i = 0; i < hparams.n_conv_layers; ++i) {
-            finp.read((char *) &hparams.conv_stride[i], sizeof(hparams.conv_stride[i]));
-        }
-
-        finp.read((char *) &hparams.num_conv_pos_embeddings, sizeof(hparams.num_conv_pos_embeddings));
-        finp.read((char *) &hparams.num_conv_pos_embedding_groups, sizeof(hparams.num_conv_pos_embedding_groups));
-        finp.read((char *) &hparams.ftype, sizeof(hparams.ftype));
-
-        const int32_t qntvr_src = hparams.ftype / GGML_QNT_VERSION_FACTOR;
-        const int32_t ftype_dst = GGML_QNT_VERSION * GGML_QNT_VERSION_FACTOR + ftype;
+        // wav2vec2bert model header does not store a global ftype; tensor ftypes are per-tensor.
+        const int32_t ftype_src = 1; // informational fallback (f16 source models are typical)
+        const int32_t qntvr_src = 0;
 
         fprintf(stderr, "%s: n_hidden       = %d\n", __func__, hparams.n_hidden);
         fprintf(stderr, "%s: n_layers       = %d\n", __func__, hparams.n_layers);
@@ -104,9 +80,9 @@ static bool wav2vec2_model_quantize(
         fprintf(stderr, "%s: n_intermediate = %d\n", __func__, hparams.n_intermediate);
         fprintf(stderr, "%s: n_vocab        = %d\n", __func__, hparams.n_vocab);
         fprintf(stderr, "%s: n_conv_layers  = %d\n", __func__, hparams.n_conv_layers);
-        fprintf(stderr, "%s: ftype (src)    = %d\n", __func__, hparams.ftype);
+        fprintf(stderr, "%s: ftype (src)    = %d\n", __func__, ftype_src);
         fprintf(stderr, "%s: qntvr (src)    = %d\n", __func__, qntvr_src);
-        fprintf(stderr, "%s: ftype (dst)    = %d\n", __func__, ftype_dst);
+        fprintf(stderr, "%s: ftype (dst)    = %d\n", __func__, (int) ftype);
         fprintf(stderr, "%s: qntvr (dst)    = %d\n", __func__, GGML_QNT_VERSION);
 
         // Write hyperparameters to output
@@ -116,20 +92,6 @@ static bool wav2vec2_model_quantize(
         fout.write((const char *) &hparams.n_intermediate, sizeof(hparams.n_intermediate));
         fout.write((const char *) &hparams.n_vocab,        sizeof(hparams.n_vocab));
         fout.write((const char *) &hparams.n_conv_layers,  sizeof(hparams.n_conv_layers));
-
-        for (int i = 0; i < hparams.n_conv_layers; ++i) {
-            fout.write((const char *) &hparams.conv_dim[i], sizeof(hparams.conv_dim[i]));
-        }
-        for (int i = 0; i < hparams.n_conv_layers; ++i) {
-            fout.write((const char *) &hparams.conv_kernel[i], sizeof(hparams.conv_kernel[i]));
-        }
-        for (int i = 0; i < hparams.n_conv_layers; ++i) {
-            fout.write((const char *) &hparams.conv_stride[i], sizeof(hparams.conv_stride[i]));
-        }
-
-        fout.write((const char *) &hparams.num_conv_pos_embeddings, sizeof(hparams.num_conv_pos_embeddings));
-        fout.write((const char *) &hparams.num_conv_pos_embedding_groups, sizeof(hparams.num_conv_pos_embedding_groups));
-        fout.write((const char *) &ftype_dst, sizeof(ftype_dst));
     }
 
     // Load and copy vocabulary

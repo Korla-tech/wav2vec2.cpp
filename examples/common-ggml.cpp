@@ -136,8 +136,12 @@ bool ggml_common_quantize_0(
             }
         }
 
-        // quantize only 2D tensors
+        // quantize only 2D tensors with row size compatible with the quantizer block size
         quantize &= (n_dims == 2);
+        if (quantize) {
+            const int64_t qk = ggml_blck_size(qtype);
+            quantize &= (qk > 0 && (ne[0] % qk) == 0);
+        }
 
         if (quantize) {
             if (ttype != GGML_TYPE_F32 && ttype != GGML_TYPE_F16) {
