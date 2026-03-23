@@ -32,7 +32,7 @@ endif()
 add_library(wav2vec2
             ../include/wav2vec2.h
             wav2vec2-arch.h
-            wav2vec2bert.cpp
+            wav2vec2.cpp
             )
 
 set_target_properties(wav2vec2 PROPERTIES
@@ -49,4 +49,30 @@ target_link_libraries(wav2vec2 PUBLIC ggml Threads::Threads)
 if (BUILD_SHARED_LIBS)
     set_target_properties(wav2vec2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_compile_definitions(wav2vec2 PRIVATE WAV2VEC2_SHARED WAV2VEC2_BUILD)
+endif()
+
+#
+# wav2vec2 library
+#
+
+add_library(wav2vec2-bert
+            ../include/wav2vec2.h
+            wav2vec2bert-arch.h
+            wav2vec2bert.cpp
+            )
+
+set_target_properties(wav2vec2-bert PROPERTIES
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${SOVERSION}
+)
+
+target_include_directories(wav2vec2-bert PUBLIC . ../include)
+target_compile_features   (wav2vec2-bert PUBLIC cxx_std_11)
+
+find_package(Threads REQUIRED)
+target_link_libraries(wav2vec2-bert PUBLIC ggml Threads::Threads)
+
+if (BUILD_SHARED_LIBS)
+    set_target_properties(wav2vec2-bert PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_definitions(wav2vec2-bert PRIVATE WAV2VEC2_SHARED WAV2VEC2_BUILD)
 endif()
