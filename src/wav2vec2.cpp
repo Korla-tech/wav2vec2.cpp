@@ -103,9 +103,10 @@ struct wav2vec2_vocab {
     std::map<id, token> id_to_token;
 
     // Special token IDs (typical for wav2vec2 phoneme models)
-    id token_pad   = 0;   // <pad>
-    id token_unk   = 1;   // <unk>
-    id token_blank = 0;   // CTC blank (usually same as pad)
+    id token_pad   = 0;    // <pad>
+    id token_unk   = 1;    // <unk>
+    id token_blank = 0;    // CTC blank (usually same as pad)
+    id token_space = 0;
 };
 
 //
@@ -281,6 +282,41 @@ struct wav2vec2_global {
 
 static wav2vec2_global g_state;
 
+static wav2vec2_vocab::id wav2vec2_find_first_token_id(
+        const wav2vec2_vocab & vocab,
+        const std::initializer_list<const char *> & names,
+        wav2vec2_vocab::id fallback) {
+    for (const char * n : names) {
+        auto it = vocab.token_to_id.find(n);
+        if (it != vocab.token_to_id.end()) {
+            return it->second;
+        }
+    }
+    return fallback;
+}
+
+static bool wav2vec2_is_special_print_suppressed(const wav2vec2_context & ctx, wav2vec2_token id) {
+    return id == ctx.vocab.token_pad || id == ctx.vocab.token_blank || id == ctx.vocab.token_unk;
+}
+
+static std::string wav2vec2_render_token(const wav2vec2_context & ctx, wav2vec2_token id) {
+    if (wav2vec2_is_special_print_suppressed(ctx, id)) {
+        return "";
+    }
+
+    if (id == ctx.vocab.token_space) {
+        return " ";
+    }
+
+    auto it = ctx.vocab.id_to_token.find(id);
+    if (it == ctx.vocab.id_to_token.end()) {
+        return "";
+    }
+    return it->second;
+}
+
+
+
 //
 // Logging implementation
 //
@@ -344,6 +380,22 @@ static size_t wav2vec2_sched_size(struct wav2vec2_sched & sched) {
         size += ggml_backend_sched_get_buffer_size(sched.sched, backend);
     }
     return size;
+}
+
+static struct ggml_tensor * wav2vec2_conv_1d_compat(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * kernel,
+        struct ggml_tensor  * input,
+        int                   stride,
+        int                   padding,
+        int                   dilation) {
+    struct ggml_tensor * kernel_f16 = kernel;
+
+    if (kernel->type != GGML_TYPE_F16) {
+        kernel_f16 = ggml_cast(ctx, kernel, GGML_TYPE_F16);
+    }
+
+    return ggml_conv_1d(ctx, kernel_f16, input, stride, padding, dilation);
 }
 
 //
@@ -432,13 +484,20 @@ static bool wav2vec2_model_load(const char * fname, wav2vec2_context & wctx) {
         wctx.vocab_end_pos = fin.tellg();
 
         // Set special tokens
-        if (vocab.token_to_id.count("<pad>")) {
-            vocab.token_pad = vocab.token_to_id["<pad>"];
-            vocab.token_blank = vocab.token_pad;
-        }
-        if (vocab.token_to_id.count("<unk>")) {
-            vocab.token_unk = vocab.token_to_id["<unk>"];
-        }
+        vocab.token_pad = wav2vec2_find_first_token_id(vocab, {"<pad>", "[PAD]", "<blank>"}, vocab.token_pad);
+        vocab.token_unk = wav2vec2_find_first_token_id(vocab, {"<unk>", "[UNK]"}, vocab.token_unk);
+
+        vocab.token_blank = vocab.token_pad;
+
+        vocab.token_space = wav2vec2_find_first_token_id(vocab, {" ", "|", "<space>", "<sp>", "[SPACE]"}, -1);
+
+        W2V_LOG_INFO(
+            "%s: special tokens: pad=%d unk=%d blank=%d space=%d\n",
+            __func__,
+            vocab.token_pad,
+            vocab.token_unk,
+            vocab.token_blank,
+            vocab.token_space);
     }
 
     // Calculate buffer sizes
@@ -875,7 +934,8 @@ static struct ggml_cgraph * wav2vec2_build_graph_conv(
 
         // Conv1D with padding to maintain length / stride
         int padding = kernel / 2;
-        cur = ggml_conv_1d(ctx0, layer.conv_w, cur, stride, padding, 1);
+        cur = wav2vec2_conv_1d_compat(ctx0, layer.conv_w, cur, stride, padding, 1);
+
 
         if (layer.conv_b) {
             // Reshape bias from [OC] to [1, OC, 1] for broadcasting with conv output [OL, OC, 1]
@@ -1038,7 +1098,7 @@ static struct ggml_cgraph * wav2vec2_build_graph_encoder(
                 g * ch_per_group * model.pos_conv_w->nb[2]);
 
             // Conv1d with same padding: stride=1, padding=kernel/2, dilation=1
-            struct ggml_tensor * out_g = ggml_conv_1d(ctx0, w_g, inp_g, 1, padding, 1);
+            struct ggml_tensor * out_g = wav2vec2_conv_1d_compat(ctx0, w_g, inp_g, 1, padding, 1);
 
             if (g == 0) {
                 ggml_set_name(out_g, "pos_conv_g0");
@@ -1838,7 +1898,8 @@ char * wav2vec2_full_get_all_phonemes(struct wav2vec2_context * ctx) {
 
     std::string result;
     for (size_t i = 0; i < ctx->state->phonemes.size(); ++i) {
-        result += wav2vec2_full_get_phoneme_text(ctx, i);
+        const wav2vec2_token id = ctx->state->phonemes[i].id;
+        result += wav2vec2_render_token(*ctx, id);
     }
 
     return strdup(result.c_str());
