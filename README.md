@@ -41,6 +41,8 @@ python models/convert-wav2vec2-to-ggml.py \
     models/wav2vec2-phoneme
 ```
 
+For wav2vec2bert models use the script `models/convert-wav2vec2bert-to-ggml.py` for conversion.
+
 ### Run
 
 ```bash
@@ -51,12 +53,16 @@ python models/convert-wav2vec2-to-ggml.py \
 ./bin/wav2vec2-cli -m models/wav2vec2-phoneme/ggml-model-f16.bin -f samples/audio.wav --print-timestamps
 ```
 
+If you want to run wav2vec2bert models use `./bin/wav2vec2-bert-cli`.
+
 ### Quantize
 
 ```bash
 # Quantize to Q6_K (recommended, ~4x smaller with <5% accuracy loss)
 ./bin/quantize-wav2vec2 models/wav2vec2-phoneme/ggml-model-f16.bin models/wav2vec2-phoneme/ggml-model-q6_k.bin q6_k
 ```
+
+If you want to quantize wav2vec2bert models use `./bin/quantize-wav2vec2-bert`.
 
 ## Project Structure
 
